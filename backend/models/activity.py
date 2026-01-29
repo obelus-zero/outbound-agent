@@ -30,7 +30,7 @@ class Activity(Base):
 
     activity_type = Column(Enum(ActivityType), nullable=False)
     description = Column(String, nullable=True)
-    metadata = Column(JSON, default=dict)
+    activity_activity_activity_metadata = Column(JSON, default=dict)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

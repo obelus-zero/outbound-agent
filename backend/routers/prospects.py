@@ -12,7 +12,29 @@ from models.company import Company
 from models.icp import ICPConfig
 from services.icp_scorer import ICPScorer
 
-router = APIRouter(prefix="/api/prospects", tags=["prospects"])
+router = APIRouter(prefix="/api/prospects", tags=["prospects"], redirect_slashes=False)
+def prospect_to_dict(p):
+    return {
+        "id": p.id,
+        "first_name": p.first_name,
+        "last_name": p.last_name,
+        "full_name": p.full_name,
+        "email": p.email,
+        "phone": p.phone,
+        "title": p.title,
+        "company_name": p.company_name,
+        "company_id": p.company_id,
+        "linkedin_url": p.linkedin_url,
+        "twitter_url": p.twitter_url,
+        "status": p.status.value if p.status else "new",
+        "source": p.source,
+        "icp_score": p.icp_score or 0,
+        "icp_match_reasons": p.icp_match_reasons or [],
+        "research_summary": p.research_summary,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
 
 
 # Schemas
@@ -65,7 +87,7 @@ class ProspectResponse(BaseModel):
 
 
 # Routes
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_prospects(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
@@ -100,7 +122,7 @@ async def list_prospects(
     prospects = query.offset((page - 1) * per_page).limit(per_page).all()
 
     return {
-        "prospects": prospects,
+        "prospects": [prospect_to_dict(p) for p in prospects],
         "total": total,
         "page": page,
         "per_page": per_page,

@@ -9,7 +9,7 @@ from models.icp import ICPConfig
 from routers.auth import get_current_user
 from models.user import User
 
-router = APIRouter(prefix="/api/icp", tags=["icp"])
+router = APIRouter(prefix="/api/icp", tags=["icp"], redirect_slashes=False)
 
 
 # Schemas
@@ -77,7 +77,7 @@ class ICPResponse(BaseModel):
 
 
 # Routes
-@router.get("/", response_model=List[ICPResponse])
+@router.get("", response_model=List[ICPResponse])
 async def list_icp_configs(db: Session = Depends(get_db)):
     return db.query(ICPConfig).filter(ICPConfig.is_active == True).all()
 
