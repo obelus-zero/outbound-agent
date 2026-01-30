@@ -5,251 +5,148 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 from database import get_db
-from models.sequence import ProspectSequence, SequenceStep, StepType, StepStatus, DEFAULT_SEQUENCE_TEMPLATES
+from models.sequence import Sequence, SequenceStep, ProspectSequence, SequenceStatus, StepType, DEFAULT_SEQUENCE_TEMPLATES
 
 router = APIRouter(prefix="/api/sequences", tags=["sequences"])
 
 
-# Schemas
 class StepCreate(BaseModel):
-    step_type: StepType
-    order: Optional[int] = None
-    subject: Optional[str] = None
-    content: Optional[str] = None
-    wait_days: Optional[int] = 0
-    notes: Optional[str] = None
-
-
-class StepUpdate(BaseModel):
-    order: Optional[int] = None
-    subject: Optional[str] = None
-    content: Optional[str] = None
-    wait_days: Optional[int] = None
-    notes: Optional[str] = None
-    status: Optional[StepStatus] = None
+    step_type: str
+    order: int
+    name: Optional[str] = None
+    delay_days: int = 0
+    delay_hours: int = 0
 
 
 class SequenceCreate(BaseModel):
-    prospect_id: int
-    name: Optional[str] = "Custom Sequence"
-    template: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    steps: List[StepCreate] = []
 
 
-class ReorderSteps(BaseModel):
-    step_ids: List[int]
+class EnrollRequest(BaseModel):
+    prospect_ids: List[int]
+    sequence_id: int
 
 
-# Routes
 @router.get("/templates")
 async def get_templates():
-    """Get available sequence templates"""
     return DEFAULT_SEQUENCE_TEMPLATES
 
 
-@router.get("/prospect/{prospect_id}")
-async def get_prospect_sequence(prospect_id: int, db: Session = Depends(get_db)):
-    """Get the active sequence for a prospect"""
-    sequence = db.query(ProspectSequence).filter(
-        ProspectSequence.prospect_id == prospect_id,
-        ProspectSequence.is_active == True
-    ).first()
+@router.get("")
+async def list_sequences(db: Session = Depends(get_db)):
+    seqs = db.query(Sequence).order_by(Sequence.created_at.desc()).all()
+    result = []
+    for seq in seqs:
+        result.append({
+            "id": seq.id,
+            "name": seq.name,
+            "description": seq.description,
+            "status": seq.status.value if seq.status else "draft",
+            "steps": [
+                {
+                    "id": step.id,
+                    "order": step.order,
+                    "step_type": step.step_type.value if step.step_type else None,
+                    "name": step.name,
+                    "delay_days": step.delay_days,
+                }
+                for step in sorted(seq.steps, key=lambda x: x.order)
+            ],
+            "created_at": seq.created_at.isoformat() if seq.created_at else None,
+        })
+    return result
 
-    if not sequence:
-        return None
 
+@router.get("/{sequence_id}")
+async def get_sequence(sequence_id: int, db: Session = Depends(get_db)):
+    seq = db.query(Sequence).filter(Sequence.id == sequence_id).first()
+    if not seq:
+        raise HTTPException(status_code=404, detail="Sequence not found")
     return {
-        "id": sequence.id,
-        "name": sequence.name,
-        "current_step": sequence.current_step,
+        "id": seq.id,
+        "name": seq.name,
+        "description": seq.description,
+        "status": seq.status.value if seq.status else "draft",
         "steps": [
             {
                 "id": step.id,
                 "order": step.order,
-                "step_type": step.step_type.value,
-                "status": step.status.value,
-                "subject": step.subject,
-                "content": step.content,
-                "wait_days": step.wait_days,
-                "notes": step.notes,
-                "scheduled_date": step.scheduled_date.isoformat() if step.scheduled_date else None,
-                "completed_date": step.completed_date.isoformat() if step.completed_date else None,
-                "response_received": step.response_received
+                "step_type": step.step_type.value if step.step_type else None,
+                "name": step.name,
+                "delay_days": step.delay_days,
             }
-            for step in sorted(sequence.steps, key=lambda x: x.order)
-        ]
+            for step in sorted(seq.steps, key=lambda x: x.order)
+        ],
     }
 
 
-@router.post("/")
+@router.post("")
 async def create_sequence(data: SequenceCreate, db: Session = Depends(get_db)):
-    """Create a new sequence for a prospect"""
-    # Deactivate any existing sequences
-    db.query(ProspectSequence).filter(
-        ProspectSequence.prospect_id == data.prospect_id
-    ).update({"is_active": False})
-
-    # Create new sequence
-    template_name = data.template or "custom"
-    template = DEFAULT_SEQUENCE_TEMPLATES.get(data.template, {})
-
-    sequence = ProspectSequence(
-        prospect_id=data.prospect_id,
-        name=template.get("name", data.name or "Custom Sequence")
+    seq = Sequence(
+        name=data.name,
+        description=data.description,
+        status=SequenceStatus.DRAFT,
     )
-    db.add(sequence)
-    db.flush()
+    db.add(seq)
+    db.commit()
+    db.refresh(seq)
 
-    # Add steps from template
-    if data.template and template:
-        for i, step_data in enumerate(template.get("steps", [])):
-            step = SequenceStep(
-                sequence_id=sequence.id,
-                order=i,
-                step_type=StepType(step_data["type"]),
-                content=step_data.get("content"),
-                wait_days=step_data.get("wait_days", 0),
-                notes=step_data.get("notes"),
-                status=StepStatus.IN_PROGRESS if i == 0 else StepStatus.PENDING
-            )
-            db.add(step)
+    for step_data in data.steps:
+        step = SequenceStep(
+            sequence_id=seq.id,
+            order=step_data.order,
+            step_type=StepType(step_data.step_type),
+            name=step_data.name,
+            delay_days=step_data.delay_days,
+            delay_hours=step_data.delay_hours,
+        )
+        db.add(step)
 
     db.commit()
-    db.refresh(sequence)
-
-    return {"id": sequence.id, "message": "Sequence created", "name": sequence.name}
-
-
-@router.post("/{sequence_id}/steps")
-async def add_step(sequence_id: int, step: StepCreate, db: Session = Depends(get_db)):
-    """Add a step to a sequence"""
-    sequence = db.query(ProspectSequence).filter(ProspectSequence.id == sequence_id).first()
-    if not sequence:
-        raise HTTPException(status_code=404, detail="Sequence not found")
-
-    # Get max order
-    max_order = db.query(SequenceStep).filter(
-        SequenceStep.sequence_id == sequence_id
-    ).count()
-
-    order = step.order if step.order is not None else max_order
-
-    # Shift existing steps if inserting
-    if step.order is not None:
-        db.query(SequenceStep).filter(
-            SequenceStep.sequence_id == sequence_id,
-            SequenceStep.order >= order
-        ).update({"order": SequenceStep.order + 1})
-
-    new_step = SequenceStep(
-        sequence_id=sequence_id,
-        order=order,
-        step_type=step.step_type,
-        subject=step.subject,
-        content=step.content,
-        wait_days=step.wait_days or 0,
-        notes=step.notes
-    )
-    db.add(new_step)
-    db.commit()
-
-    return {"id": new_step.id, "message": "Step added"}
-
-
-@router.put("/steps/{step_id}")
-async def update_step(step_id: int, data: StepUpdate, db: Session = Depends(get_db)):
-    """Update a step"""
-    step = db.query(SequenceStep).filter(SequenceStep.id == step_id).first()
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-
-    for key, value in data.dict(exclude_unset=True).items():
-        setattr(step, key, value)
-
-    db.commit()
-    return {"message": "Step updated"}
-
-
-@router.delete("/steps/{step_id}")
-async def delete_step(step_id: int, db: Session = Depends(get_db)):
-    """Delete a step"""
-    step = db.query(SequenceStep).filter(SequenceStep.id == step_id).first()
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-
-    sequence_id = step.sequence_id
-    order = step.order
-
-    db.delete(step)
-
-    # Reorder remaining steps
-    db.query(SequenceStep).filter(
-        SequenceStep.sequence_id == sequence_id,
-        SequenceStep.order > order
-    ).update({"order": SequenceStep.order - 1})
-
-    db.commit()
-    return {"message": "Step deleted"}
-
-
-@router.post("/{sequence_id}/reorder")
-async def reorder_steps(sequence_id: int, data: ReorderSteps, db: Session = Depends(get_db)):
-    """Reorder steps in a sequence"""
-    for i, step_id in enumerate(data.step_ids):
-        db.query(SequenceStep).filter(SequenceStep.id == step_id).update({"order": i})
-
-    db.commit()
-    return {"message": "Steps reordered"}
-
-
-@router.post("/steps/{step_id}/complete")
-async def complete_step(
-    step_id: int,
-    response_received: bool = False,
-    db: Session = Depends(get_db)
-):
-    """Mark a step as completed and advance to next"""
-    step = db.query(SequenceStep).filter(SequenceStep.id == step_id).first()
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-
-    step.status = StepStatus.COMPLETED
-    step.completed_date = datetime.utcnow()
-    step.response_received = response_received
-
-    # Advance sequence to next step
-    sequence = step.sequence
-    next_step_order = step.order + 1
-    next_step = db.query(SequenceStep).filter(
-        SequenceStep.sequence_id == sequence.id,
-        SequenceStep.order == next_step_order
-    ).first()
-
-    if next_step:
-        sequence.current_step = next_step_order
-        next_step.status = StepStatus.IN_PROGRESS
-
-        # Calculate scheduled date for wait steps
-        if next_step.step_type == StepType.WAIT:
-            next_step.scheduled_date = datetime.utcnow() + timedelta(days=next_step.wait_days)
-
-    db.commit()
+    db.refresh(seq)
 
     return {
-        "message": "Step completed",
-        "next_step": next_step.id if next_step else None,
-        "sequence_complete": next_step is None
+        "id": seq.id,
+        "name": seq.name,
+        "description": seq.description,
+        "status": seq.status.value,
+        "steps": [{"id": s.id, "order": s.order, "step_type": s.step_type.value, "name": s.name, "delay_days": s.delay_days} for s in seq.steps],
     }
 
 
-@router.post("/steps/{step_id}/skip")
-async def skip_step(step_id: int, db: Session = Depends(get_db)):
-    """Skip a step and move to next"""
-    step = db.query(SequenceStep).filter(SequenceStep.id == step_id).first()
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-
-    step.status = StepStatus.SKIPPED
+@router.delete("/{sequence_id}")
+async def delete_sequence(sequence_id: int, db: Session = Depends(get_db)):
+    seq = db.query(Sequence).filter(Sequence.id == sequence_id).first()
+    if not seq:
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    db.query(SequenceStep).filter(SequenceStep.sequence_id == sequence_id).delete()
+    db.delete(seq)
     db.commit()
+    return {"status": "deleted"}
 
-    # Move to next step
-    return await complete_step(step_id, response_received=False, db=db)
+
+@router.post("/enroll")
+async def enroll_prospects(data: EnrollRequest, db: Session = Depends(get_db)):
+    seq = db.query(Sequence).filter(Sequence.id == data.sequence_id).first()
+    if not seq:
+        raise HTTPException(status_code=404, detail="Sequence not found")
+    enrolled = []
+    for prospect_id in data.prospect_ids:
+        ps = ProspectSequence(
+            prospect_id=prospect_id,
+            sequence_id=data.sequence_id,
+            current_step=1,
+            status=SequenceStatus.ACTIVE,
+        )
+        db.add(ps)
+        enrolled.append(prospect_id)
+    db.commit()
+    return {"enrolled": enrolled, "sequence_id": data.sequence_id}
+
+
+@router.get("/prospect/{prospect_id}")
+async def get_prospect_sequences(prospect_id: int, db: Session = Depends(get_db)):
+    sequences = db.query(ProspectSequence).filter(ProspectSequence.prospect_id == prospect_id).all()
+    return [{"id": ps.id, "sequence_id": ps.sequence_id, "current_step": ps.current_step, "status": ps.status.value if ps.status else "active"} for ps in sequences]

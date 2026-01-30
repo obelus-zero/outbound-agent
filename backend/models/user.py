@@ -26,3 +26,4 @@ class User(Base):
     # Relationships
     activities = relationship("Activity", back_populates="user")
     icp_configs = relationship("ICPConfig", back_populates="created_by_user")
+    sequences = relationship("Sequence", back_populates="created_by_user")

@@ -90,16 +90,13 @@ export const workflow = {
 
 // Sequences API
 export const sequences = {
-  getTemplates: () => api.get('/sequences/templates'),
-  getForProspect: (prospectId) => api.get(`/sequences/prospect/${prospectId}`),
+  list: () => api.get('/sequences'),
+  get: (id) => api.get('/sequences/' + id),
   create: (data) => api.post('/sequences', data),
-  addStep: (sequenceId, step) => api.post(`/sequences/${sequenceId}/steps`, step),
-  updateStep: (stepId, data) => api.put(`/sequences/steps/${stepId}`, data),
-  deleteStep: (stepId) => api.delete(`/sequences/steps/${stepId}`),
-  reorderSteps: (sequenceId, stepIds) => api.post(`/sequences/${sequenceId}/reorder`, { step_ids: stepIds }),
-  completeStep: (stepId, responseReceived = false) =>
-    api.post(`/sequences/steps/${stepId}/complete`, null, { params: { response_received: responseReceived } }),
-  skipStep: (stepId) => api.post(`/sequences/steps/${stepId}/skip`),
+  delete: (id) => api.delete('/sequences/' + id),
+  enrollProspects: (prospectIds, sequenceId) => api.post('/sequences/enroll', { prospect_ids: prospectIds, sequence_id: sequenceId }),
+  getProspectSequences: (prospectId) => api.get('/sequences/prospect/' + prospectId),
+  getTemplates: () => api.get('/sequences/templates'),
 }
 
 // Integrations API

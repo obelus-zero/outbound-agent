@@ -1,16 +1,16 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, JSON, DateTime, Enum, Boolean, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey, Boolean, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
+
 from database import Base
 
 
-class StepType(str, enum.Enum):
-    LINKEDIN_CONNECTION = "linkedin_connection"
-    LINKEDIN_INMAIL = "linkedin_inmail"
-    EMAIL = "email"
-    PHONE_CALL = "phone_call"
-    WAIT = "wait"
+class SequenceStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
 
 
 class StepStatus(str, enum.Enum):
@@ -20,105 +20,72 @@ class StepStatus(str, enum.Enum):
     SKIPPED = "skipped"
 
 
-class ProspectSequence(Base):
-    """Outreach sequence for a specific prospect"""
-    __tablename__ = "prospect_sequences"
+class StepType(str, enum.Enum):
+    LINKEDIN_CONNECTION = "linkedin_connection"
+    LINKEDIN_DM = "linkedin_dm"
+    LINKEDIN_INMAIL = "linkedin_inmail"
+    COLD_EMAIL = "cold_email"
+    FOLLOW_UP_EMAIL = "follow_up_email"
+    COLD_CALL = "cold_call"
+    VOICEMAIL = "voicemail"
+    WAIT = "wait"
+    TASK = "task"
 
+
+DEFAULT_SEQUENCE_TEMPLATES = {
+    "standard": [
+        {"order": 1, "step_type": "linkedin_connection", "name": "LinkedIn Connection", "delay_days": 0},
+        {"order": 2, "step_type": "cold_email", "name": "Initial Email", "delay_days": 2},
+        {"order": 3, "step_type": "linkedin_inmail", "name": "LinkedIn InMail", "delay_days": 3},
+        {"order": 4, "step_type": "cold_call", "name": "Cold Call", "delay_days": 2},
+        {"order": 5, "step_type": "voicemail", "name": "Voicemail", "delay_days": 0},
+        {"order": 6, "step_type": "follow_up_email", "name": "Follow-up Email", "delay_days": 3},
+    ]
+}
+
+
+class Sequence(Base):
+    __tablename__ = "sequences"
     id = Column(Integer, primary_key=True, index=True)
-    prospect_id = Column(Integer, ForeignKey("prospects.id"), nullable=False)
-    name = Column(String, default="Custom Sequence")
-    is_active = Column(Boolean, default=True)
-    current_step = Column(Integer, default=0)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    status = Column(SQLEnum(SequenceStatus), default=SequenceStatus.DRAFT)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_user = relationship("User", back_populates="sequences")
+    icp_config_id = Column(Integer, ForeignKey("icp_configs.id"), nullable=True)
+    is_default = Column(Boolean, default=False)
+    steps = relationship("SequenceStep", back_populates="sequence", order_by="SequenceStep.order")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    prospect = relationship("Prospect", back_populates="sequence")
-    steps = relationship("SequenceStep", back_populates="sequence", order_by="SequenceStep.order", cascade="all, delete-orphan")
 
 
 class SequenceStep(Base):
-    """Individual step in an outreach sequence"""
     __tablename__ = "sequence_steps"
-
     id = Column(Integer, primary_key=True, index=True)
-    sequence_id = Column(Integer, ForeignKey("prospect_sequences.id"), nullable=False)
+    sequence_id = Column(Integer, ForeignKey("sequences.id"), nullable=False)
+    sequence = relationship("Sequence", back_populates="steps")
     order = Column(Integer, nullable=False)
-    step_type = Column(Enum(StepType), nullable=False)
-    status = Column(Enum(StepStatus), default=StepStatus.PENDING)
-
-    # Step configuration
-    subject = Column(String, nullable=True)
-    content = Column(Text, nullable=True)
-    wait_days = Column(Integer, default=0)
-    notes = Column(Text, nullable=True)
-
-    # Tracking
-    scheduled_date = Column(DateTime, nullable=True)
-    completed_date = Column(DateTime, nullable=True)
-    response_received = Column(Boolean, default=False)
-
+    step_type = Column(SQLEnum(StepType), nullable=False)
+    name = Column(String(255))
+    delay_days = Column(Integer, default=0)
+    delay_hours = Column(Integer, default=0)
+    template = Column(Text)
+    instructions = Column(Text)
+    is_optional = Column(Boolean, default=False)
+    stop_on_reply = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    sequence = relationship("ProspectSequence", back_populates="steps")
 
 
-# Default sequence templates
-DEFAULT_SEQUENCE_TEMPLATES = {
-    "linkedin_first": {
-        "name": "LinkedIn First",
-        "description": "Start with LinkedIn connection, then InMail, then email",
-        "steps": [
-            {"type": "linkedin_connection", "content": ""},
-            {"type": "wait", "wait_days": 3},
-            {"type": "linkedin_inmail", "content": ""},
-            {"type": "wait", "wait_days": 5},
-            {"type": "email", "content": ""},
-            {"type": "wait", "wait_days": 3},
-            {"type": "phone_call", "notes": ""},
-        ]
-    },
-    "email_first": {
-        "name": "Email First",
-        "description": "Lead with email, then follow up on LinkedIn",
-        "steps": [
-            {"type": "email", "content": ""},
-            {"type": "wait", "wait_days": 3},
-            {"type": "email", "content": ""},
-            {"type": "wait", "wait_days": 2},
-            {"type": "linkedin_connection", "content": ""},
-            {"type": "wait", "wait_days": 3},
-            {"type": "phone_call", "notes": ""},
-        ]
-    },
-    "multi_channel": {
-        "name": "Multi-Channel Blitz",
-        "description": "Hit all channels quickly for maximum touchpoints",
-        "steps": [
-            {"type": "linkedin_connection", "content": ""},
-            {"type": "email", "content": ""},
-            {"type": "wait", "wait_days": 2},
-            {"type": "linkedin_inmail", "content": ""},
-            {"type": "wait", "wait_days": 2},
-            {"type": "email", "content": ""},
-            {"type": "phone_call", "notes": ""},
-            {"type": "wait", "wait_days": 3},
-            {"type": "email", "content": ""},
-        ]
-    },
-    "gentle_touch": {
-        "name": "Gentle Touch",
-        "description": "Longer wait times, less aggressive approach",
-        "steps": [
-            {"type": "email", "content": ""},
-            {"type": "wait", "wait_days": 7},
-            {"type": "linkedin_connection", "content": ""},
-            {"type": "wait", "wait_days": 7},
-            {"type": "email", "content": ""},
-            {"type": "wait", "wait_days": 7},
-            {"type": "phone_call", "notes": ""},
-        ]
-    }
-}
+class ProspectSequence(Base):
+    __tablename__ = "prospect_sequences"
+    id = Column(Integer, primary_key=True, index=True)
+    prospect_id = Column(Integer, ForeignKey("prospects.id"), nullable=False)
+    prospect = relationship("Prospect", back_populates="sequences")
+    sequence_id = Column(Integer, ForeignKey("sequences.id"), nullable=False)
+    sequence = relationship("Sequence")
+    current_step = Column(Integer, default=1)
+    status = Column(SQLEnum(SequenceStatus), default=SequenceStatus.ACTIVE)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    next_step_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    notes = Column(Text)

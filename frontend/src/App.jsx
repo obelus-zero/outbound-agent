@@ -9,6 +9,7 @@ import useAuthStore from './hooks/useAuth'
 // Pages
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Sequences from "./pages/Sequences"
 import Prospects from './pages/Prospects'
 import ProspectDetail from './pages/ProspectDetail'
 import ReviewQueue from './pages/ReviewQueue'
@@ -172,6 +173,7 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/prospects" element={<Prospects />} />
+              <Route path="/sequences" element={<Sequences />} />
                   <Route path="/prospects/:id" element={<ProspectDetail />} />
                   <Route path="/review" element={<ReviewQueue />} />
                   <Route path="/approved" element={<Approved />} />

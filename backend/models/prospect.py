@@ -88,4 +88,5 @@ class Prospect(Base):
     company = relationship("Company", back_populates="prospects")
     messages = relationship("Message", back_populates="prospect")
     activities = relationship("Activity", back_populates="prospect")
+    sequences = relationship("ProspectSequence", back_populates="prospect")
     sequence = relationship("ProspectSequence", back_populates="prospect", uselist=False)

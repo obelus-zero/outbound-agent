@@ -106,7 +106,7 @@ class ICPScorer:
             score = max(score, keyword_score)
 
         # Check seniority
-        seniority = prospect_data.get("seniority", "").lower()
+        seniority = (prospect_data.get("seniority") or "").lower()
         for target_seniority in self.icp.target_seniority:
             if target_seniority.lower() in title or target_seniority.lower() in seniority:
                 score = min(score + 15, 100)

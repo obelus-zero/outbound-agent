@@ -227,7 +227,7 @@ async def import_csv(
         'phone': ['phone', 'Phone', 'phone_number', 'Phone Number'],
         'title': ['title', 'Title', 'job_title', 'Job Title', 'position', 'Position'],
         'company': ['company', 'Company', 'company_name', 'Company Name', 'organization'],
-        'linkedin_url': ['linkedin_url', 'linkedin', 'LinkedIn', 'LinkedIn URL'],
+        'linkedin_url': ['linkedin_url', 'linkedin', 'LinkedIn', 'LinkedIn URL', 'Personal Linkedin URL', 'Personal LinkedIn URL', 'profile url'],
         'twitter_url': ['twitter_url', 'twitter', 'Twitter', 'Twitter URL'],
     }
 
@@ -241,10 +241,11 @@ async def import_csv(
         # Extract data
         first_name = get_value(row, 'first_name') or ''
         last_name = get_value(row, 'last_name') or ''
-        full_name = get_value(row, 'full_name') or f"{first_name} {last_name}".strip()
+        full_name = get_value(row, 'full_name') or f"{first_name} {last_name}".strip() or (get_value(row, 'linkedin_url') or '').split('/')[-1]
         email = get_value(row, 'email')
 
-        if not full_name and not email:
+        linkedin_url = get_value(row, 'linkedin_url')
+        if not full_name and not email and not linkedin_url:
             skipped += 1
             continue
 
